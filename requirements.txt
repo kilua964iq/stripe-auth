@@ -1,3 +1,5 @@
-# نسخة telebot المعدّلة التي تدعم style= و icon_custom_emoji_id=
-git+https://github.com/coder2020official/pyTelegramBotAPI
+python-telegram-bot==21.6
+openai>=1.0.0
 requests>=2.31.0
+httpx>=0.25.0
+telebot
